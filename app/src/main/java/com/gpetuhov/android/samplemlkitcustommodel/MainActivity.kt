@@ -154,7 +154,15 @@ class MainActivity : AppCompatActivity() {
             interpreter?.run(inputs, inputOutputOptions)
                 ?.addOnSuccessListener { result ->
                     val labelProbArray = result.getOutput<Array<ByteArray>>(0)
-                    toast("success")
+                    if (labelProbArray != null) {
+                        val resultArray = labelProbArray[0]
+
+                        var maxValue = resultArray.max() ?: 0
+                        var maxValueIndex = resultArray.indexOf(maxValue)
+
+                        var label = mLabelList?.get(maxValueIndex)
+                        resultTextView.text = label
+                    }
                 }
                 ?.addOnFailureListener { exception ->
                     exception.printStackTrace()
