@@ -1,8 +1,8 @@
 package com.gpetuhov.android.samplemlkitcustommodel
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
@@ -13,8 +13,13 @@ import com.google.firebase.ml.common.modeldownload.FirebaseModelManager
 import com.google.firebase.ml.custom.*
 import com.pawegio.kandroid.toast
 import kotlinx.android.synthetic.main.activity_main.*
+import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
+import java.io.InputStreamReader
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.*
 
 // This example uses pre-trained TensorFlow Lite model from Google Codelab:
 // https://codelabs.developers.google.com/codelabs/mlkit-android-custom-model/#1
@@ -27,6 +32,21 @@ import java.io.InputStream
 // https://medium.com/technogise/enhance-your-skills-and-career-using-the-power-of-open-source-808c1dff7a9c
 
 class MainActivity : AppCompatActivity() {
+
+    /**
+     * Dimensions of inputs.
+     */
+    private val DIM_BATCH_SIZE = 1
+    private val DIM_PIXEL_SIZE = 3
+    private val DIM_IMG_SIZE_X = 224
+    private val DIM_IMG_SIZE_Y = 224
+    /**
+     * Labels corresponding to the output of the vision model.
+     */
+    private var mLabelList: List<String>? = null
+
+    /* Preallocated buffers for storing image data. */
+    private val intValues = IntArray(DIM_IMG_SIZE_X * DIM_IMG_SIZE_Y)
 
     private var interpreter: FirebaseModelInterpreter? = null
     private lateinit var inputOutputOptions: FirebaseModelInputOutputOptions
@@ -91,9 +111,14 @@ class MainActivity : AppCompatActivity() {
     // We must know input and output parameters of the .tflite model.
     // In case we don't, follow the instructions at: https://firebase.google.com/docs/ml-kit/android/use-custom-models
     private fun specifyInputOutput() {
+        mLabelList = loadLabelList(this)
+
+        val inputDims = intArrayOf(DIM_BATCH_SIZE, DIM_IMG_SIZE_X, DIM_IMG_SIZE_Y, DIM_PIXEL_SIZE)
+        val outputDims = intArrayOf(DIM_BATCH_SIZE, mLabelList?.size ?: 0)
+
         inputOutputOptions = FirebaseModelInputOutputOptions.Builder()
-            .setInputFormat(0, FirebaseModelDataType.FLOAT32, intArrayOf(1, 224, 224, 3))
-            .setOutputFormat(0, FirebaseModelDataType.FLOAT32, intArrayOf(1, 5))
+            .setInputFormat(0, FirebaseModelDataType.BYTE, inputDims)
+            .setOutputFormat(0, FirebaseModelDataType.BYTE, outputDims)
             .build()
     }
 
@@ -115,34 +140,78 @@ class MainActivity : AppCompatActivity() {
         val bitmapFromAsset = getBitmapFromAsset("photo.jpeg")
 
         if (bitmapFromAsset != null) {
-            val bitmap = Bitmap.createScaledBitmap(bitmapFromAsset, 224, 224, true)
-
-            val batchNum = 0
-            val input = Array(1) { Array(224) { Array(224) { FloatArray(3) } } }
-            for (x in 0..223) {
-                for (y in 0..223) {
-                    val pixel = bitmap.getPixel(x, y)
-                    // Normalize channel values to [-1.0, 1.0]. This requirement varies by
-                    // model. For example, some models might require values to be normalized
-                    // to the range [0.0, 1.0] instead.
-                    input[batchNum][x][y][0] = (Color.red(pixel) - 127) / 255.0f
-                    input[batchNum][x][y][1] = (Color.green(pixel) - 127) / 255.0f
-                    input[batchNum][x][y][2] = (Color.blue(pixel) - 127) / 255.0f
-                }
-            }
+            // Create input data.
+            val imgData = convertBitmapToByteBuffer(
+                bitmapFromAsset,
+                bitmapFromAsset.width,
+                bitmapFromAsset.height
+            )
 
             val inputs = FirebaseModelInputs.Builder()
-                .add(input) // add() as many input arrays as your model requires
+                .add(imgData) // add() as many input arrays as your model requires
                 .build()
 
             interpreter?.run(inputs, inputOutputOptions)
                 ?.addOnSuccessListener { result ->
-                    val output = result.getOutput<Array<FloatArray>>(0)
-                    val probabilities = output[0]
+                    val labelProbArray = result.getOutput<Array<ByteArray>>(0)
+                    toast("success")
                 }
                 ?.addOnFailureListener { exception ->
                     exception.printStackTrace()
                 }
         }
+    }
+
+    /**
+     * Reads label list from Assets.
+     */
+    private fun loadLabelList(activity: Activity): List<String> {
+        val labelList = ArrayList<String>()
+        try {
+            BufferedReader(InputStreamReader(activity.assets.open("labels.txt"))).use { reader ->
+                var line = reader.readLine()
+                while (line != null) {
+                    labelList.add(line)
+                    line = reader.readLine()
+                }
+            }
+        } catch (e: IOException) {
+            toast("Failed to read label list.")
+        }
+
+        return labelList
+    }
+
+    /**
+     * Writes Image data into a `ByteBuffer`.
+     */
+    @Synchronized
+    private fun convertBitmapToByteBuffer(
+        bitmap: Bitmap, width: Int, height: Int
+    ): ByteBuffer {
+        val imgData = ByteBuffer.allocateDirect(
+            DIM_BATCH_SIZE * DIM_IMG_SIZE_X * DIM_IMG_SIZE_Y * DIM_PIXEL_SIZE
+        )
+        imgData.order(ByteOrder.nativeOrder())
+        val scaledBitmap = Bitmap.createScaledBitmap(
+            bitmap, DIM_IMG_SIZE_X, DIM_IMG_SIZE_Y,
+            true
+        )
+        imgData.rewind()
+        scaledBitmap.getPixels(
+            intValues, 0, scaledBitmap.width, 0, 0,
+            scaledBitmap.width, scaledBitmap.height
+        )
+        // Convert the image to int points.
+        var pixel = 0
+        for (i in 0 until DIM_IMG_SIZE_X) {
+            for (j in 0 until DIM_IMG_SIZE_Y) {
+                val `val` = intValues[pixel++]
+                imgData.put((`val` shr 16 and 0xFF).toByte())
+                imgData.put((`val` shr 8 and 0xFF).toByte())
+                imgData.put((`val` and 0xFF).toByte())
+            }
+        }
+        return imgData
     }
 }
