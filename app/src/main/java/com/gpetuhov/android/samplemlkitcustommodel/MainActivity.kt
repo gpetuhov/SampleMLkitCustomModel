@@ -23,8 +23,10 @@ import java.util.*
 
 // This example uses pre-trained TensorFlow Lite model from Google Codelab:
 // https://codelabs.developers.google.com/codelabs/mlkit-android-custom-model/#1
+// It processes the input image and sets probabilities for the list of labels,
+// that contains 1000 words, according to the image contents.
 
-// The model is both hosted in Firebase and included in the app's assets folder
+// The model is both hosted in Firebase and included in the app's assets folder.
 
 // Don't forget to set Internet permission in the manifest!
 
@@ -33,6 +35,10 @@ import java.util.*
 
 class MainActivity : AppCompatActivity() {
 
+    // These params are taken from the Codelab.
+    // For the ML Kit to properly interpret the model,
+    // we have to provide it with exact form of model's input and output
+    // (we have to know it).
     /**
      * Dimensions of inputs.
      */
@@ -40,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private val DIM_PIXEL_SIZE = 3
     private val DIM_IMG_SIZE_X = 224
     private val DIM_IMG_SIZE_Y = 224
+
     /**
      * Labels corresponding to the output of the vision model.
      */
@@ -111,6 +118,8 @@ class MainActivity : AppCompatActivity() {
     // We must know input and output parameters of the .tflite model.
     // In case we don't, follow the instructions at: https://firebase.google.com/docs/ml-kit/android/use-custom-models
     private fun specifyInputOutput() {
+        // This is taken from the Codelab
+
         mLabelList = loadLabelList(this)
 
         val inputDims = intArrayOf(DIM_BATCH_SIZE, DIM_IMG_SIZE_X, DIM_IMG_SIZE_Y, DIM_PIXEL_SIZE)
@@ -153,15 +162,20 @@ class MainActivity : AppCompatActivity() {
 
             interpreter?.run(inputs, inputOutputOptions)
                 ?.addOnSuccessListener { result ->
+                    // Model used in this example returns data in the form of array of byte arrays
                     val labelProbArray = result.getOutput<Array<ByteArray>>(0)
                     if (labelProbArray != null) {
+                        // Get first byte array
                         val resultArray = labelProbArray[0]
 
-                        var maxValue = resultArray.max() ?: 0
-                        var maxValueIndex = resultArray.indexOf(maxValue)
+                        // Find index of the maximum item
+                        // (index of the label with maximum probability).
+                        val maxValue = resultArray.max() ?: 0
+                        val maxValueIndex = resultArray.indexOf(maxValue)
 
-                        var label = mLabelList?.get(maxValueIndex)
-                        resultTextView.text = label
+                        // Get label with this index from the label list
+                        val label = mLabelList?.get(maxValueIndex)
+                        resultTextView.text = label ?: "Error"
                     }
                 }
                 ?.addOnFailureListener { exception ->
@@ -170,9 +184,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Reads label list from Assets.
-     */
+    // Reads label list from Assets.
+    // This is taken from the Codelab.
     private fun loadLabelList(activity: Activity): List<String> {
         val labelList = ArrayList<String>()
         try {
@@ -190,10 +203,8 @@ class MainActivity : AppCompatActivity() {
         return labelList
     }
 
-    /**
-     * Writes Image data into a `ByteBuffer`.
-     */
-    @Synchronized
+    // This converts Bitmap to the form of model's input.
+    // This is taken from the Codelab.
     private fun convertBitmapToByteBuffer(
         bitmap: Bitmap, width: Int, height: Int
     ): ByteBuffer {
